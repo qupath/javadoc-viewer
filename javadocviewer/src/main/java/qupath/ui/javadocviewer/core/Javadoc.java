@@ -2,29 +2,16 @@ package qupath.ui.javadocviewer.core;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ui.javadocviewer.UriUtils;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Scanner;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
 
 /**
  * A Javadoc specified by a {@link URI} and containing {@link JavadocElement JavadocElements}.
@@ -42,7 +29,6 @@ public record Javadoc(URI uri, List<JavadocElement> elements) {
     private static final Pattern URI_PATTERN = Pattern.compile("href=\"(.+?)\"");
     private static final Pattern NAME_PATTERN = Pattern.compile("<a .*?>(?:<span .*?>)?(.*?)(?:</span>)?</a>");
     private static final Pattern CATEGORY_PATTERN = Pattern.compile("</a> - (.+?) ");
-    private static final int REQUEST_TIMEOUT_SECONDS = 10;
 
     /**
      * Create a Javadoc from a URI and Javadoc elements. Take a look at {@link #create(URI)}
@@ -77,24 +63,14 @@ public record Javadoc(URI uri, List<JavadocElement> elements) {
 
     private static CompletableFuture<String> getIndexAllPage(URI javadocIndexURI) {
         String link = javadocIndexURI.toString().replace(INDEX_PAGE, INDEX_ALL_PAGE);
-        URI indexAllURI;
+        URI indexAllUri;
         try {
-            indexAllURI = new URI(link);
+            indexAllUri = new URI(link);
         } catch (URISyntaxException e) {
             return CompletableFuture.failedFuture(e);
         }
 
-        if (Utils.doesUrilinkToWebsite(indexAllURI)) {
-            return getIndexAllPageContentFromHttp(indexAllURI);
-        } else {
-            return CompletableFuture.supplyAsync(() -> {
-                if (indexAllURI.getScheme().contains("jar")) {
-                    return getIndexAllPageContentFromJar(indexAllURI);
-                } else {
-                    return getIndexAllPageContentFromNonJar(indexAllURI);
-                }
-            });
-        }
+        return UriUtils.getContentOfUri(indexAllUri);
     }
 
     private static List<JavadocElement> parseJavadocIndexPage(String javadocURI, String indexHTMLPage) {
@@ -134,65 +110,6 @@ public record Javadoc(URI uri, List<JavadocElement> elements) {
         }
 
         return elements;
-    }
-
-    private static CompletableFuture<String> getIndexAllPageContentFromHttp(URI uri) {
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.ALWAYS)
-                .build();
-
-        logger.debug("Sending GET request to {} to read the index-all page content...", uri);
-
-        return httpClient.sendAsync(
-                HttpRequest.newBuilder()
-                        .uri(uri)
-                        .timeout(Duration.of(REQUEST_TIMEOUT_SECONDS, ChronoUnit.SECONDS))
-                        .GET()
-                        .build(),
-                HttpResponse.BodyHandlers.ofString()
-        ).thenApply(response -> {
-            logger.debug("Got response {} from {}", response, uri);
-            return response.body();
-        }).whenComplete((b, e) -> httpClient.close());
-    }
-
-    private static String getIndexAllPageContentFromJar(URI uri) {
-        String jarURI = uri.toString().substring(
-                uri.toString().indexOf('/'),
-                uri.toString().lastIndexOf('!')
-        );
-        logger.debug("Opening {} jar file to read the index-all page content...", jarURI);
-
-        try (ZipFile zipFile = new ZipFile(jarURI)) {
-            ZipEntry entry = zipFile.getEntry(INDEX_ALL_PAGE);
-
-            if (entry == null) {
-                throw new IllegalArgumentException(String.format("The provided jar file %s doesn't contain any %s entry", jarURI, INDEX_ALL_PAGE));
-            } else {
-                try (
-                        InputStream inputStream = zipFile.getInputStream(entry);
-                        Scanner scanner = new Scanner(inputStream)
-                ) {
-                    StringBuilder lines = new StringBuilder();
-                    while (scanner.hasNextLine()) {
-                        lines.append(scanner.nextLine());
-                    }
-                    return lines.toString();
-                }
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static String getIndexAllPageContentFromNonJar(URI uri) {
-        logger.debug("Reading {} file to get the index-all page content...", uri);
-
-        try (Stream<String> lines = Files.lines(Paths.get(uri))) {
-            return lines.collect(Collectors.joining("\n"));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private static String correctNameIfConstructor(String name, String category) {

@@ -2,6 +2,7 @@ package qupath.ui.javadocviewer.core;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ui.javadocviewer.UriUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -51,7 +52,7 @@ public class JavadocsFinder {
                         if (e instanceof InterruptedException) {
                             Thread.currentThread().interrupt();
                         }
-                        logger.debug("Error when creating javadoc of {}. Skipping it", uri, e);
+                        logger.warn("Error when creating javadoc of {}. Skipping it", uri, e);
 
                         return null;
                     }
@@ -63,7 +64,7 @@ public class JavadocsFinder {
     }
 
     private static List<URI> findJavadocUrisFromUri(URI uri) {
-        if (Utils.doesUrilinkToWebsite(uri)) {
+        if (UriUtils.doesUriLinkToWebsite(uri)) {
             logger.debug("URI {} retrieved", uri);
             return List.of(uri);
         } else {
