@@ -3,6 +3,7 @@ package qupath.ui.javadocviewer.gui.viewer;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.ReadOnlyStringProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -12,12 +13,16 @@ import javafx.scene.control.ListCell;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.web.WebHistory;
 import javafx.scene.web.WebView;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qupath.ui.javadocviewer.UriUtils;
 import qupath.ui.javadocviewer.gui.components.AutoCompletionTextField;
 import qupath.ui.javadocviewer.core.Javadoc;
 import qupath.ui.javadocviewer.core.JavadocsFinder;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -36,7 +41,9 @@ public class JavadocViewer extends BorderPane {
     private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ui.javadocviewer.strings");
     private static final Pattern REDIRECTION_PATTERN = Pattern.compile("window\\.location\\.replace\\(['\"](.*?)['\"]\\)");
     private static final List<String> CATEGORIES_TO_SKIP = List.of("package", "module", "Variable", "Exception", "Annotation", "Element");
+    private static final Logger logger = LoggerFactory.getLogger(JavadocViewer.class);
     private final WebView webView = new WebView();
+    private final ChangeListener<? super URI> urisListener = (p, o, n) -> updateWebViewContent(n);
     @FXML
     private Button back;
     @FXML
@@ -140,7 +147,8 @@ public class JavadocViewer extends BorderPane {
                             javadocElement,
                             () -> {
                                 updateSelectedUri(javadocElement.uri());
-                                webView.getEngine().load(javadocElement.uri().toString());
+
+                                updateWebViewContent(javadocElement.uri());
                             }
                     ))
                     .filter(javadocEntry -> !CATEGORIES_TO_SKIP.contains(javadocEntry.getCategory()))
@@ -154,26 +162,7 @@ public class JavadocViewer extends BorderPane {
                 Bindings.size(webView.getEngine().getHistory().getEntries()).subtract(1)
         ));
 
-        uris.getSelectionModel().selectedItemProperty().addListener((p, o, n) -> {
-            if (n != null && !webView.getEngine().getLocation().equals(n.toString())) {
-                webView.getEngine().load(n.toString());
-            }
-        });
-
-        // Sometimes, redirection is not automatically performed
-        // (see https://github.com/qupath/qupath/pull/1513#issuecomment-2095553840)
-        // This code enforces redirection
-        webView.getEngine().documentProperty().addListener((p, o, n) -> {
-            if (n != null) {
-                Matcher redirectionMatcher = REDIRECTION_PATTERN.matcher(n.getDocumentElement().getTextContent());
-
-                if (redirectionMatcher.find() && redirectionMatcher.groupCount() > 0) {
-                    changeLocation(webView.getEngine().getLocation(), redirectionMatcher.group(1)).ifPresent(newLocation ->
-                            webView.getEngine().load(newLocation)
-                    );
-                }
-            }
-        });
+        uris.getSelectionModel().selectedItemProperty().addListener(urisListener);
     }
 
     private void offset(int offset) {
@@ -186,9 +175,14 @@ public class JavadocViewer extends BorderPane {
     }
 
     private static String getName(URI uri) {
-        if ("jar".equals(uri.getScheme()))
+        if (UriUtils.doesUriLinkToWebsite(uri)) {
+            return uri.getHost();
+        }
+
+        if (UriUtils.doesUriLinkToJar(uri)) {
             uri = URI.create(uri.getRawSchemeSpecificPart());
-        var path = Paths.get(uri);
+        }
+        Path path = Paths.get(uri);
 
         String name = path.getFileName().toString().toLowerCase();
         // If we have index.html, we want to take the name of the parent
@@ -215,17 +209,60 @@ public class JavadocViewer extends BorderPane {
         }
 
         if (closestUri != null) {
+            // Prevent urisListener from being triggered
+            uris.getSelectionModel().selectedItemProperty().removeListener(urisListener);
+
             uris.getSelectionModel().select(closestUri);
+
+            uris.getSelectionModel().selectedItemProperty().addListener(urisListener);
         }
     }
 
-    private static Optional<String> changeLocation(String currentLocation, String newLocation) {
-        int index = currentLocation.lastIndexOf("/");
+    private void updateWebViewContent(URI uri) {
+        if (uri != null && !webView.getEngine().getLocation().equals(uri.toString())) {
+            // Sometimes, redirection is not automatically performed
+            // (see https://github.com/qupath/qupath/pull/1513#issuecomment-2095553840)
+            // This code enforces redirection only if the file is local
+            if (UriUtils.doesUriLinkToWebsite(uri)) {
+                logger.debug("{} links to a website, so no redirection is checked", uri);
 
-        if (index == -1) {
-            return Optional.empty();
-        } else {
-            return Optional.of(currentLocation.substring(0, currentLocation.lastIndexOf("/")) + "/" + newLocation);
+                webView.getEngine().load(uri.toString());
+            } else {
+                UriUtils.getContentOfUri(uri).handle((body, error) -> {
+                    if (body == null) {
+                        logger.error("Error while getting content of {}. Cannot check for redirection", uri, error);
+
+                        Platform.runLater(() -> webView.getEngine().load(uri.toString()));
+                        return null;
+                    }
+
+                    Matcher redirectionMatcher = REDIRECTION_PATTERN.matcher(body);
+                    if (redirectionMatcher.find() && redirectionMatcher.groupCount() > 0) {
+                        String redirectionLink = redirectionMatcher.group(1);
+                        logger.debug(
+                                "Redirection detected from {} to {}. Attempting to create new link",
+                                uri,
+                                redirectionLink
+                        );
+
+                        Optional<String> newLocation = changeLocation(uri.toString(), redirectionLink);
+                        if (newLocation.isPresent()) {
+                            logger.debug("New link created. Redirecting from {} to {}", uri, newLocation.get());
+
+                            Platform.runLater(() -> webView.getEngine().load(newLocation.get()));
+                        } else {
+                            logger.debug("Cannot create new link from {} to {}. No redirection performed", uri, redirectionLink);
+
+                            Platform.runLater(() -> webView.getEngine().load(uri.toString()));
+                        }
+                    } else {
+                        logger.debug("No redirection detected in body of {}. No redirection performed", uri);
+
+                        Platform.runLater(() -> webView.getEngine().load(uri.toString()));
+                    }
+                    return null;
+                });
+            }
         }
     }
 
@@ -239,5 +276,15 @@ public class JavadocViewer extends BorderPane {
         }
 
         return n;
+    }
+
+    private static Optional<String> changeLocation(String currentLocation, String newLocation) {
+        int index = currentLocation.lastIndexOf("/");
+
+        if (index == -1) {
+            return Optional.empty();
+        } else {
+            return Optional.of(currentLocation.substring(0, currentLocation.lastIndexOf("/")) + "/" + newLocation);
+        }
     }
 }
