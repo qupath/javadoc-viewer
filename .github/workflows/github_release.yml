@@ -8,3 +8,5 @@ jobs:
     permissions:
       contents: write
     uses: qupath/actions/.github/workflows/github-release.yml@main
+    with:
+      build-path: javadocviewer/build/libs/*.jar
