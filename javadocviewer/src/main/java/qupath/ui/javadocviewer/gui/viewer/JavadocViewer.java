@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -58,11 +57,13 @@ public class JavadocViewer extends BorderPane {
      *
      * @param stylesheet a property containing a link to a stylesheet which should
      *                   be applied to this viewer. Can be null
-     * @param urisToSearch URIs to search for Javadocs. See {@link JavadocsFinder#findJavadocs(URI...)}
+     * @param urisToSearch URIs to search for Javadocs. See {@link JavadocsFinder#findJavadocs(List, int)}
+     * @param searchDepth if one of the provided URI points to a local directory, indicate how deep to search for Javadocs
+     *                    inside that directory
      * @throws IOException if the window creation fails
      */
-    public JavadocViewer(ReadOnlyStringProperty stylesheet, URI... urisToSearch) throws IOException {
-        initUI(stylesheet, Arrays.stream(urisToSearch).toList());
+    public JavadocViewer(ReadOnlyStringProperty stylesheet, List<URI> urisToSearch, int searchDepth) throws IOException {
+        initUI(stylesheet, urisToSearch, searchDepth);
         setUpListeners();
     }
 
@@ -85,7 +86,7 @@ public class JavadocViewer extends BorderPane {
         offset(1);
     }
 
-    private void initUI(ReadOnlyStringProperty stylesheet, List<URI> urisToSearch) throws IOException {
+    private void initUI(ReadOnlyStringProperty stylesheet, List<URI> urisToSearch, int searchDepth) throws IOException {
         FXMLLoader loader = new FXMLLoader(JavadocViewer.class.getResource("javadoc_viewer.fxml"), resources);
         loader.setRoot(this);
         loader.setController(this);
@@ -123,7 +124,7 @@ public class JavadocViewer extends BorderPane {
         }
 
         webView.getEngine().loadContent(resources.getString("JavadocViewer.findingJavadocs"));
-        JavadocsFinder.findJavadocs(urisToSearch.toArray(new URI[0])).thenAccept(javadocs -> Platform.runLater(() -> {
+        JavadocsFinder.findJavadocs(urisToSearch, searchDepth).thenAccept(javadocs -> Platform.runLater(() -> {
             this.uris.getItems().setAll(javadocs.stream()
                     .map(Javadoc::uri)
                     .sorted(Comparator.comparing(JavadocViewer::getName))

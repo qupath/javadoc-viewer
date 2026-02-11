@@ -11,7 +11,6 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -28,7 +27,6 @@ public class JavadocsFinder {
     private static final Logger logger = LoggerFactory.getLogger(JavadocsFinder.class);
     private static final String JAVADOC_INDEX_FILE = "index.html";
     private static final List<String> ARCHIVE_EXTENSIONS = List.of(".jar", ".zip");
-    private static final int SEARCH_DEPTH = 4;
 
     private JavadocsFinder() {
         throw new AssertionError("This class is not instantiable.");
@@ -37,13 +35,14 @@ public class JavadocsFinder {
     /**
      * Asynchronously search for Javadocs in the specified URIs.
      *
-     * @param urisToSearch URIs to search for Javadocs. It can be a directory, an HTTP link,
-     *                     a link to a jar file...
+     * @param urisToSearch URIs to search for Javadocs. It can be a directory, an HTTP link, a link to a jar file...
+     * @param searchDepth if one of the provided URI points to a local directory, indicate how deep to search for Javadocs
+     *                    inside that directory
      * @return a CompletableFuture with the list of Javadocs found
      */
-    public static CompletableFuture<List<Javadoc>> findJavadocs(URI... urisToSearch) {
-        return CompletableFuture.supplyAsync(() -> Arrays.stream(urisToSearch)
-                .map(JavadocsFinder::findJavadocUrisFromUri)
+    public static CompletableFuture<List<Javadoc>> findJavadocs(List<URI> urisToSearch, int searchDepth) {
+        return CompletableFuture.supplyAsync(() -> urisToSearch.stream()
+                .map(uri -> findJavadocUrisFromUri(uri, searchDepth))
                 .flatMap(List::stream)
                 .map(uri -> {
                     try {
@@ -63,13 +62,13 @@ public class JavadocsFinder {
         );
     }
 
-    private static List<URI> findJavadocUrisFromUri(URI uri) {
+    private static List<URI> findJavadocUrisFromUri(URI uri, int searchDepth) {
         if (UriUtils.doesUriLinkToWebsite(uri)) {
             logger.debug("URI {} retrieved", uri);
             return List.of(uri);
         } else {
             try {
-                return findJavadocUrisFromPath(Paths.get(uri));
+                return findJavadocUrisFromPath(Paths.get(uri), searchDepth);
             } catch (Exception e) {
                 logger.debug("Could not convert URI {} to path", uri, e);
                 return List.of();
@@ -77,18 +76,18 @@ public class JavadocsFinder {
         }
     }
 
-    private static List<URI> findJavadocUrisFromPath(Path path) {
+    private static List<URI> findJavadocUrisFromPath(Path path, int searchDepth) {
         if (Files.isDirectory(path)) {
-            return findJavadocUrisFromDirectory(path);
+            return findJavadocUrisFromDirectory(path, searchDepth);
         } else {
             return findJavadocUrisFromFile(path).map(List::of).orElse(List.of());
         }
     }
 
-    private static List<URI> findJavadocUrisFromDirectory(Path directory) {
-        logger.debug("Searching for javadocs in {} directory with depth {}", directory, SEARCH_DEPTH);
+    private static List<URI> findJavadocUrisFromDirectory(Path directory, int searchDepth) {
+        logger.debug("Searching for javadocs in {} directory with depth {}", directory, searchDepth);
 
-        try (Stream<Path> walk = Files.walk(directory, JavadocsFinder.SEARCH_DEPTH)) {
+        try (Stream<Path> walk = Files.walk(directory, searchDepth)) {
             return walk
                     .map(JavadocsFinder::findJavadocUrisFromFile)
                     .flatMap(Optional::stream)
