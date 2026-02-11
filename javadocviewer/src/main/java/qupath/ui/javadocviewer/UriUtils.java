@@ -7,9 +7,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -101,10 +103,14 @@ public class UriUtils {
     }
 
     private static String getContentOfJarUri(URI uri) {
-        // The provided URI is expected to be like: jar:file:/path/to/some-javadoc.jar!/index.html#someParameters
-        String jarUri = uri.toString().substring(
-                uri.toString().indexOf('/'),
-                uri.toString().lastIndexOf('!')
+        // The provided URI is expected to be like: jar:file:/path/to/some-javadoc.jar!/index.html#someParameters with some
+        // HTML encoding for special characters
+        String jarUri = URLDecoder.decode(
+                uri.toString().substring(
+                        uri.toString().indexOf('/'),
+                        uri.toString().lastIndexOf('!')
+                ),
+                StandardCharsets.UTF_8
         );
         logger.debug("Opening {} jar file to read the content of {}...", jarUri, uri);
 
