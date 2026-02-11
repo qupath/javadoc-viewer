@@ -6,7 +6,6 @@ import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.net.URI;
-import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
 
@@ -20,21 +19,25 @@ public class JavadocViewerCommand implements Runnable {
     private final Stage owner;
     private final ReadOnlyStringProperty stylesheet;
     private final List<URI> urisToSearch;
+    private final int searchDepth;
     private Stage stage;
     private JavadocViewer javadocViewer;
 
     /**
-     * Create the command. This will not create the viewer until either the command is run or {@link #getJavadocViewer()} is called.
+     * Create the command. This will not create the viewer until either the command is run or {@link #getJavadocViewer()}
+     * is called.
      *
      * @param owner the stage that should own the viewer window. Can be null
-     * @param stylesheet a property containing a link to a stylesheet which should
-     *                   be applied to the viewer. Can be null
-     * @param urisToSearch URIs to search for Javadocs. See {@link JavadocViewer#JavadocViewer(ReadOnlyStringProperty, URI...)}
+     * @param stylesheet a property containing a link to a stylesheet which should be applied to the viewer. Can be null
+     * @param urisToSearch URIs to search for Javadocs. See {@link JavadocViewer#JavadocViewer(ReadOnlyStringProperty, List, int)}
+     * @param searchDepth if one of the provided URI points to a local directory, indicate how deep to search for Javadocs
+     *                    inside that directory
      */
-    public JavadocViewerCommand(Stage owner, ReadOnlyStringProperty stylesheet, URI... urisToSearch) {
+    public JavadocViewerCommand(Stage owner, ReadOnlyStringProperty stylesheet, List<URI> urisToSearch, int searchDepth) {
         this.owner = owner;
         this.stylesheet = stylesheet;
-        this.urisToSearch = Arrays.stream(urisToSearch).toList();
+        this.urisToSearch = List.copyOf(urisToSearch);
+        this.searchDepth = searchDepth;
     }
 
     /**
@@ -46,7 +49,7 @@ public class JavadocViewerCommand implements Runnable {
     public JavadocViewer getJavadocViewer() {
         if (javadocViewer == null) {
             try {
-                javadocViewer = new JavadocViewer(stylesheet, urisToSearch.toArray(new URI[0]));
+                javadocViewer = new JavadocViewer(stylesheet, urisToSearch, searchDepth);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

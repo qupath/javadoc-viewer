@@ -39,12 +39,14 @@ public class JavadocViewerApp extends Application {
                             try {
                                 return new URI(param);
                             } catch (URISyntaxException e) {
-                                logger.warn(String.format("Couldn't convert URI %s", param), e);
+                                logger.warn("Couldn't convert URI {}", param, e);
+
                                 return null;
                             }
                         })
                         .filter(Objects::nonNull)
-                        .toArray(URI[]::new)
+                        .toList(),
+                7
         );
 
         Scene scene = new Scene(javadocViewer);
